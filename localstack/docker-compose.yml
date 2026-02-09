@@ -1,0 +1,18 @@
+services:
+  localstack:
+    container_name: localstack_cobre
+    image: localstack/localstack
+    ports:
+      - "127.0.0.1:4566:4566"
+      - "127.0.0.1:4510-4559:4510-4559"
+    environment:
+      - SERVICES=dynamodb,sqs
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      # Usamos un volumen con nombre en lugar de una ruta relativa
+      - localstack_volume:/var/lib/localstack
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+volumes:
+  localstack_volume:
