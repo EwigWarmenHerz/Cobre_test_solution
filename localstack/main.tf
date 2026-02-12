@@ -11,29 +11,20 @@ provider "aws" {
   }
 }
 
-# 1. DynamoDB para Delivery Logs (NoSQL)
 resource "aws_dynamodb_table" "delivery_logs" {
-  name         = "DeliveryLogs"
-  billing_mode = "PAY_PER_REQUEST"    
-  
- 
-  hash_key     = "notification_id" 
+  name         = "DeliveryLogs" # ¡OJO! Mayúsculas cuentan
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "notification_id" # Debe coincidir con item.put("notification_id", ...)
   range_key    = "timestamp"
 
   attribute {
     name = "notification_id"
-    type = "S" # String (UUID de la notificación)
+    type = "S"
   }
 
   attribute {
     name = "timestamp"
-    type = "S" # String (ISO8601 Date)
-  }
-
-  tags = {
-    Name        = "delivery-logs-table"
-    Environment = "development"
-    Project     = "Cobre-Notifications"
+    type = "S"
   }
 }
 

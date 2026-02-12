@@ -1,5 +1,6 @@
 package com.taller.cobre.domain.use_case;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.taller.cobre.domain.model.client.ClientRouting;
 import com.taller.cobre.domain.model.enums.NotificationStatus;
 import com.taller.cobre.domain.model.event.EventDomain;
@@ -40,6 +41,7 @@ public class NotificationUseCase implements NotificationGateway {
     private final NotificationWebhookConnector webClientConnector;
     private final DomainMapper mapper;
 
+
     public NotificationUseCase(ClientRepository clientRepository, CacheRepository cacheAdapterRepository, EventRepository eventRepository, NotificationRepository notificationRepository, NotificationLogsRepository logsRepository, QueueProducer queueProducer, NotificationWebhookConnector webClientConnector, DomainMapper mapper) {
         this.clientRepository = clientRepository;
         this.cacheAdapterRepository = cacheAdapterRepository;
@@ -53,11 +55,13 @@ public class NotificationUseCase implements NotificationGateway {
 
     @Override
     public Mono<Void> sendNotification(EventDomain eventDomain) {
+        log.info("enviando notificación");
         return Mono.just(eventDomain)
             .flatMap(this::saveEvent)
             .flatMap(savedEventDomain -> findClientRoutingData(savedEventDomain.clientId())
                 .flatMap(client -> {
                     if (client.isSubscribedTo(savedEventDomain.eventType())) {
+                        log.info("Cliente suscrito al evento, se procede a eenviar mensaje: " + eventDomain);
                         return processNotificationDelivery(savedEventDomain, client);
                     }
                     log.info("Cliente {} no suscrito al evento {}", client.id(), savedEventDomain.eventType());
@@ -90,13 +94,22 @@ public class NotificationUseCase implements NotificationGateway {
     public Mono<Boolean> retryNotification(String secretKey, long eventId) {
         return checkIfSecretKeyBelongsToClient(secretKey)
             .flatMap(client -> getOriginalEvent(eventId)
-                .flatMap(this::sendNotification)
+                .flatMap(this::sendRetryNotification)
                 .map(unused -> true)
                 .onErrorResume(e -> {
                     log.error("Fallo en el reintento de notificación para evento {}: {}", eventId, e.getMessage());
                     return Mono.just(false);
                 })
             );
+    }
+
+    @Override
+    public Mono<Void> retryNotification(NotificationDomain notificationDomain) {
+        var notification = mapper.toNotificationEntity(notificationDomain);
+        return findClientRoutingData(notificationDomain.clientId())
+            .flatMap(clientRouting -> webClientConnector.sendNotification(clientRouting.url(), clientRouting.secretKey(), notificationDomain.payload())
+                .flatMap(webhookResponse -> processWebhookResponse(notification, notificationDomain.payload(), webhookResponse)))
+            ;
     }
 
     private static NotificationResponse mapTpNotificationResponse(NotificationWithEvent notificationWithEvent) {
@@ -117,16 +130,39 @@ public class NotificationUseCase implements NotificationGateway {
     }
 
 
+    public Mono<Void> sendRetryNotification(EventDomain eventDomain) {
+        log.info("Retrying notificación");
+        return Mono.just(eventDomain)
+            .flatMap(savedEventDomain -> findClientRoutingData(savedEventDomain.clientId())
+                .flatMap(client -> {
+                    if (client.isSubscribedTo(savedEventDomain.eventType())) {
+                        log.info("Cliente suscrito al evento, se procede a eenviar mensaje: " + eventDomain);
+                        return processNotificationDelivery(savedEventDomain, client);
+                    }
+                    log.info("Cliente {} no suscrito al evento {}", client.id(), savedEventDomain.eventType());
+                    return Mono.empty();
+                }))
+            .onErrorResume(e -> {
+                log.error("Fallo crítico en el flujo de notificación para evento: {}", eventDomain.eventType(), e);
+                return Mono.empty();
+            });
+    }
 
 
     private Mono<EventDomain> saveEvent(EventDomain eventDomain) {
-        var eventEntity = mapper.toEventEntity(eventDomain).withCreatedAt(LocalDateTime.now());
+        log.info("Guardando evento en la base de datos");
+        var eventEntity = mapper.toEventEntity(eventDomain)
+            .withId(null)
+            .withCreatedAt(LocalDateTime.now());
         return eventRepository.save(eventEntity)
             .map(savedEvent -> eventDomain.withId(savedEvent.getId()))
+            .doOnSuccess(eventDomain1 ->log.info("Evento {} guardado en base de datos", eventDomain1))
+            .doOnError(e -> log.error(e.getMessage()))
             .onErrorMap(e -> new TechnicalException("Database connection exception", e));
     }
 
     private Mono<ClientRouting> findClientRoutingData(long clientId) {
+        log.info("looking for client");
         return cacheAdapterRepository.getClientRouting(clientId)
             .onErrorResume(e -> {
                 log.warn("Error reading client data from cache {}, checking on disk database", clientId, e);
@@ -134,45 +170,57 @@ public class NotificationUseCase implements NotificationGateway {
             })
             .switchIfEmpty(clientRepository.findById(clientId)
                 .map(mapper::toClientRouting)
-                .flatMap(routing -> cacheAdapterRepository.cacheClient(routing)
-                    .onErrorResume(e -> {
-                        log.warn("Could not update client's data to cache db {}", clientId);
-                        return Mono.empty();
-                    })
-                    .thenReturn(routing)))
+                .flatMap(routing -> {
+                        return cacheAdapterRepository.cacheClient(routing)
+                            .onErrorResume(e -> {
+                                log.warn("Could not update client's data to cache db {}", clientId);
+                                return Mono.empty();
+                            })
+                            .thenReturn(routing);
+                    }
+                ))
             .switchIfEmpty(Mono.error(new BusinessException("Could not find client in the database " + clientId)));
     }
 
     private Mono<Void> processNotificationDelivery(EventDomain eventDomain, ClientRouting clientRouting) {
+        log.info("Procesando envio de notificación");
         var initialNotification = createInitialNotification(eventDomain, clientRouting);
-
+        log.info("Event: {}", eventDomain);
+        log.info("Client: {}", clientRouting);
+        log.info("initial notification: {}", initialNotification);
         return notificationRepository.save(initialNotification)
             .onErrorMap(e -> new TechnicalException("Failed to save notification", e))
             .flatMap(notification -> webClientConnector.sendNotification(clientRouting.url(), clientRouting.secretKey(), eventDomain.details())
-                .flatMap(webhookResponse -> {
-                    var nextStatus = webhookResponse.isSuccess() ? NotificationStatus.SENT : NotificationStatus.RETRYING;
-                    if (webhookResponse.isSuccess()) {
-                        return updateStatus(notification, webhookResponse, nextStatus)
-                            .onErrorResume(e -> {
-                                log.error("Fail to update success notification on DB {}", notification.getId(), e);
-                                return Mono.empty();
-                            });
-                    } else {
-                        var updatedNotification = notification.withTries(notification.getTries() + 1);
-                        return updateStatus(updatedNotification, webhookResponse, nextStatus)
-                            .onErrorResume(e -> {
-                                log.error("Failed to update notification retry status on database", e);
-                                return Mono.empty();
-                            })
-                            .then(sendToAuxQueue(mapper.toNotificationDomain(updatedNotification)));
-                    }
-                }));
+                .flatMap(webhookResponse -> processWebhookResponse(notification, eventDomain.details(), webhookResponse)));
+    }
+
+    @Nonnull
+    private Mono<Void> processWebhookResponse(Notification notification, JsonNode payload ,WebhookResponse webhookResponse) {
+        var nextStatus = webhookResponse.isSuccess() ? NotificationStatus.SENT : NotificationStatus.RETRYING;
+        if (webhookResponse.isSuccess()) {
+            return updateStatus(notification, webhookResponse, nextStatus)
+                .onErrorResume(e -> {
+                    log.error("Fail to update success notification on DB {}", notification.getId(), e);
+                    return Mono.empty();
+                });
+        } else {
+            var updatedNotification = notification.withTries(notification.getTries() + 1);
+            return updateStatus(updatedNotification, webhookResponse, nextStatus)
+                .onErrorResume(e -> {
+                    log.error("Failed to update notification retry status on database", e);
+                    return Mono.empty();
+                })
+                .then(sendToAuxQueue(mapper.toNotificationDomain(updatedNotification, payload)
+                    .withPayload(payload)));
+        }
     }
 
     private Mono<Void> updateStatus(Notification notification, WebhookResponse response, NotificationStatus nextStatus) {
         var updatedNotification = notification
             .withStatus(nextStatus)
             .withUpdatedAt(LocalDateTime.now());
+
+        log.info("Notification sent: {}", updatedNotification);
 
         return notificationRepository.save(updatedNotification)
             .flatMap(savedNotification -> {

@@ -16,7 +16,7 @@ cloud:
     access-key: taller
     secret-key: taller
     endpoint: http://localhost:4566
-    log-registry-table: notification-logs
+    log-registry-table: DeliveryLogs
     event-queue: notification-event-queue
     retry-queue: notification-retry-queue
     dlq-queue: notification-dead-letter-queue

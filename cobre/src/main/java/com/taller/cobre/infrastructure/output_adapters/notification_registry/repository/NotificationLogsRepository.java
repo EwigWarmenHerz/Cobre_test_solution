@@ -2,6 +2,7 @@ package com.taller.cobre.infrastructure.output_adapters.notification_registry.re
 
 import com.taller.cobre.domain.model.notification.AuditLog;
 import com.taller.cobre.infrastructure.output_adapters.notification_registry.entities.NotificationLog;
+import com.taller.cobre.util.AwsParameters;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
@@ -16,24 +17,23 @@ import java.util.Map;
 @Slf4j
 public class NotificationLogsRepository {
     private final DynamoDbAsyncClient dynamoClient;
-    private static final String TABLE_NAME = "notification-logs";
+    private final AwsParameters parameters;
 
-    public NotificationLogsRepository(DynamoDbAsyncClient dynamoClient) {
+    public NotificationLogsRepository(DynamoDbAsyncClient dynamoClient, AwsParameters parameters) {
         this.dynamoClient = dynamoClient;
+        this.parameters = parameters;
     }
 
     public Mono<Void> saveLog(AuditLog audit) {
         var item = new HashMap<String, AttributeValue>();
 
-        // Llave de partición (Partition Key)
-        item.put("notificationId", AttributeValue.builder().s(audit.notificationId()).build());
 
-        // Atributos
+        item.put("notification_id", AttributeValue.builder().s(audit.notificationId()).build());
+
         item.put("clientId", AttributeValue.builder().n(String.valueOf(audit.clientId())).build());
-        item.put("statusCode", AttributeValue.builder().n(String.valueOf(audit.status())).build());
+        item.put("statusCode", AttributeValue.builder().s(String.valueOf(audit.status())).build());
         item.put("timestamp", AttributeValue.builder().s(audit.timestamp().toString()).build());
 
-        // Manejo de nulos para campos opcionales
         if (audit.responseBody() != null) {
             item.put("responseBody", AttributeValue.builder().s(audit.responseBody()).build());
         }
@@ -45,7 +45,7 @@ public class NotificationLogsRepository {
         }
 
         PutItemRequest request = PutItemRequest.builder()
-            .tableName(TABLE_NAME)
+            .tableName(parameters.logRegistryTable())
             .item(item)
             .build();
 

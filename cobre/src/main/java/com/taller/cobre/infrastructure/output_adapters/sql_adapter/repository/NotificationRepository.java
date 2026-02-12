@@ -19,7 +19,7 @@ public interface NotificationRepository extends ReactiveCrudRepository<Notificat
         n.tries        AS tries,
         n.updated_at   AS updatedAt,
         e.event_type   AS eventType,
-        e.details      AS eventDetails
+        e.payload      AS eventDetails
         FROM notifications n
         INNER JOIN events e ON n.event_id = e.id
         WHERE n.id = :id
@@ -27,13 +27,17 @@ public interface NotificationRepository extends ReactiveCrudRepository<Notificat
     Mono<NotificationWithEvent> findByNotificationIdWithEventData(Long id);
 
     @Query("""
-        SELECT n.id, n.status, n.tries, n.updated_at, 
-               e.event_type, e.details 
-        FROM notifications n 
-        INNER JOIN events e ON n.event_id = e.id 
-        WHERE n.client_id = :clientId 
-        ORDER BY n.updated_at DESC
-    """)
+    SELECT n.id AS id, 
+           n.status AS status, 
+           n.tries AS tries, 
+           n.updated_at AS updated_at, 
+           e.event_type AS event_type, 
+           e.payload AS details 
+    FROM notifications n 
+    INNER JOIN events e ON n.event_id = e.id 
+    WHERE n.client_id = :clientId 
+    ORDER BY n.updated_at DESC
+""")
     Flux<NotificationWithEvent> findAllWithEventDataByClientId(Long clientId);
 
 }

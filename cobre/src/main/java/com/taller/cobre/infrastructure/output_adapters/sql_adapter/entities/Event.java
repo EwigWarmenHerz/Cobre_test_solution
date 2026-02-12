@@ -16,15 +16,16 @@ import java.time.LocalDateTime;
 @Table("events")
 public class Event {
     @Id
-    private long id;
+    private Long id;
 
     @Column("client_id")
-    private long clientId;
+    private Long clientId;
 
-    private JsonNode details;
+    @Column("payload")
+    private JsonNode payload;
 
     @Column("event_type")
-    private Integer eventType;
+    private String eventType;
 
     @Column("created_at")
     private LocalDateTime createdAt;

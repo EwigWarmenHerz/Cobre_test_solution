@@ -61,19 +61,20 @@ public class DomainMapper {
         return Event.builder()
             .id(eventDomain.id())
             .clientId(eventDomain.clientId())
-            .details(eventDomain.details())
-            .eventType(eventDomain.eventType().ordinal())
+            .payload(eventDomain.details())
+            .eventType(eventDomain.eventType().name())
             .build();
     }
 
-    public NotificationDomain toNotificationDomain(Notification entity) {
+    public NotificationDomain toNotificationDomain(Notification entity, JsonNode payload) {
         if (entity == null) return null;
 
         return new NotificationDomain(
             entity.getId(),
-            entity.getEventId(),
             entity.getClientId(),
+            entity.getEventId(),
             entity.getStatus(),
+            payload,
             entity.getTries(),
             entity.getCreatedAt(),
             entity.getUpdatedAt()
@@ -99,8 +100,8 @@ public class DomainMapper {
         return new EventDomain(
             entity.getId(),
             entity.getClientId(),
-            EventType.values()[entity.getEventType()],
-            entity.getDetails(),
+            EventType.valueOf(entity.getEventType()),
+            entity.getPayload(),
             entity.getCreatedAt()
         );
     }

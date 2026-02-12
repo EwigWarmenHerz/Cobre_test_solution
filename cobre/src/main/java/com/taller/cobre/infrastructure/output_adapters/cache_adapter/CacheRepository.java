@@ -13,14 +13,15 @@ import java.time.Duration;
 @Slf4j
 @RequiredArgsConstructor
 public class CacheRepository {
-    private final ReactiveRedisTemplate<String, Object> reactiveRedisTemplate;
+    private final ReactiveRedisTemplate<String, ClientRouting> reactiveRedisTemplate;
     private static final String KEY_PREFIX = "client:config:";
 
     public Mono<ClientRouting> getClientRouting(long clientId) {
         return reactiveRedisTemplate.opsForValue()
             .get(KEY_PREFIX + clientId)
             .cast(ClientRouting.class)
-            .doOnNext(config -> log.debug("Cache hit para cliente: {}", clientId));
+            .doOnNext(config -> log.debug("Cache hit para cliente: {}", clientId))
+            .doOnSuccess(clientRouting -> log.info("Get cached client: " + clientRouting));
     }
 
     public Mono<Void> cacheClient(ClientRouting routing) {

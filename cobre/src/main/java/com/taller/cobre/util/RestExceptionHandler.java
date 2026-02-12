@@ -14,10 +14,10 @@ public class RestExceptionHandler {
     @ExceptionHandler(EventsException.class)
     public Mono<ResponseEntity<ApiErrorResponse>> exceptionHandler(EventsException ex){
         return Mono.just(ResponseEntity
-            .status(ex.technicalMessages.statusCode)
+            .status(500)
             .body(ApiErrorResponse.builder()
                 .message(ex.getMessage())
-                .errorCode(ex.technicalMessages.statusCode)
+                .errorCode(500)
                 .timestamp(LocalDateTime.now())
                 .build()));
     }

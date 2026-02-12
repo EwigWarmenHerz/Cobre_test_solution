@@ -1,5 +1,6 @@
 package com.taller.cobre.domain.model.notification;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.taller.cobre.domain.model.enums.NotificationStatus;
 import lombok.Builder;
 import lombok.With;
@@ -12,6 +13,7 @@ public record NotificationDomain(
     long clientId,
     long eventId,
     NotificationStatus status,
+    JsonNode payload,
     Integer tries,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
